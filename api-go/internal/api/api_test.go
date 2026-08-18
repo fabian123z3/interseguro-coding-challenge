@@ -21,33 +21,34 @@ const (
 	testPassword = "clave-de-prueba"
 )
 
-// discardLogger evita ensuciar la salida del test con las líneas de request.
-func discardLogger() *slog.Logger {
+// descartarRegistrador evita ensuciar la salida del test con las líneas de request.
+func descartarRegistrador() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(io.Discard, nil))
 }
 
-func testConfig(statsURL string) config.Config {
-	return config.Config{
-		Port:               "0",
-		StatsAPIURL:        statsURL,
-		StatsTimeout:       2 * time.Second,
-		StatsMaxRetries:    0, // sin reintentos: los tests deben ser deterministas y rápidos
-		MaxMatrixDimension: 8,
-		JWTSecret:          testSecret,
-		JWTIssuer:          "test-issuer",
-		JWTAudience:        "test-audience",
-		JWTTTL:             15 * time.Minute,
-		DemoUsername:       testUser,
-		DemoPassword:       testPassword,
+func configuracionPrueba(urlEstadisticas string) config.Configuracion {
+	return config.Configuracion{
+		Puerto:                       "0",
+		URLAPIEstadisticas:           urlEstadisticas,
+		TiempoEsperaEstadisticas:     2 * time.Second,
+		MaximoReintentosEstadisticas: 0, // sin reintentos: los tests deben ser deterministas y rápidos
+		DimensionMaximaMatriz:        8,
+		OrigenesCORS:                 []string{"https://permitido.ejemplo.cl"},
+		SecretoJWT:                   testSecret,
+		EmisorJWT:                    "test-issuer",
+		AudienciaJWT:                 "test-audience",
+		VigenciaJWT:                  15 * time.Minute,
+		UsuarioDemo:                  testUser,
+		ContrasenaDemo:               testPassword,
 	}
 }
 
-// fakeStatsResponse reproduce literalmente la forma que devuelve la API Node.
+// respuestaEstadisticasSimulada reproduce literalmente la forma que devuelve la API Node.
 //
 // Es una copia de una respuesta real del servicio, no una aproximación escrita a
 // mano: un stub que solo se parezca al contrato deja pasar los desajustes entre
 // ambos servicios, que es justo lo que estos tests deben detectar.
-const fakeStatsResponse = `{
+const respuestaEstadisticasSimulada = `{
   "overall": {"max": 10, "min": -2, "average": 3.5, "sum": 42, "count": 12},
   "perMatrix": {
     "q": {"max": 1, "min": -1, "average": 0, "sum": 0, "count": 4, "rows": 2, "cols": 2, "isSquare": true, "isDiagonal": true, "tolerance": 1e-9},
@@ -57,70 +58,70 @@ const fakeStatsResponse = `{
   "toleranceFactor": 1e-9
 }`
 
-// capturedRequest guarda lo que el upstream recibió, para poder afirmar sobre
+// solicitudCapturada guarda lo que el upstream recibió, para poder afirmar sobre
 // la propagación de encabezados y el cuerpo enviado.
-type capturedRequest struct {
-	authorization string
-	requestID     string
-	body          []byte
-	calls         int
+type solicitudCapturada struct {
+	autorizacion string
+	idSolicitud  string
+	cuerpo       []byte
+	llamadas     int
 }
 
-// newStatsStub levanta un upstream simulado. handler puede ser nil para usar la
+// nuevoSimuladorEstadisticas levanta un upstream simulado. manejador puede ser nil para usar la
 // respuesta exitosa por defecto.
-func newStatsStub(t *testing.T, captured *capturedRequest, handler http.HandlerFunc) *httptest.Server {
+func nuevoSimuladorEstadisticas(t *testing.T, captured *solicitudCapturada, manejador http.HandlerFunc) *httptest.Server {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if captured != nil {
-			captured.calls++
-			captured.authorization = r.Header.Get("Authorization")
-			captured.requestID = r.Header.Get("X-Request-ID")
-			captured.body, _ = io.ReadAll(r.Body)
+			captured.llamadas++
+			captured.autorizacion = r.Header.Get("Authorization")
+			captured.idSolicitud = r.Header.Get("X-Request-ID")
+			captured.cuerpo, _ = io.ReadAll(r.Body)
 		}
-		if handler != nil {
-			handler(w, r)
+		if manejador != nil {
+			manejador(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, fakeStatsResponse)
+		_, _ = io.WriteString(w, respuestaEstadisticasSimulada)
 	}))
 	t.Cleanup(server.Close)
 	return server
 }
 
-// login obtiene un token válido a través del endpoint real, en lugar de firmar
+// iniciarSesionPrueba obtiene un token válido a través del endpoint real, en lugar de firmar
 // uno a mano: así el test también cubre que ambos extremos usen el mismo
 // emisor, audiencia y secreto.
-func login(t *testing.T, app *fiber.App) string {
+func iniciarSesionPrueba(t *testing.T, app *fiber.App) string {
 	t.Helper()
 
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/auth/login", "",
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/auth/login", "",
 		map[string]string{"username": testUser, "password": testPassword})
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("login falló con status %d", resp.StatusCode)
+		t.Fatalf("iniciarSesionPrueba falló con status %d", resp.StatusCode)
 	}
 
-	var body LoginResponse
-	decodeBody(t, resp, &body)
-	return body.Token
+	var cuerpo RespuestaInicioSesion
+	decodificarCuerpo(t, resp, &cuerpo)
+	return cuerpo.Token
 }
 
-// doRequest ejecuta un request contra la app en memoria, sin abrir un puerto.
-func doRequest(t *testing.T, app *fiber.App, method, path, token string, payload any) *http.Response {
+// hacerSolicitudPrueba ejecuta un request contra la app en memoria, sin abrir un puerto.
+func hacerSolicitudPrueba(t *testing.T, app *fiber.App, method, path, token string, contenido any) *http.Response {
 	t.Helper()
 
-	var reader io.Reader
-	if payload != nil {
-		encoded, err := json.Marshal(payload)
+	var lector io.Reader
+	if contenido != nil {
+		encoded, err := json.Marshal(contenido)
 		if err != nil {
-			t.Fatalf("no se pudo serializar el payload: %v", err)
+			t.Fatalf("no se pudo serializar el contenido: %v", err)
 		}
-		reader = bytes.NewReader(encoded)
+		lector = bytes.NewReader(encoded)
 	}
 
-	req := httptest.NewRequest(method, path, reader)
-	if payload != nil {
+	req := httptest.NewRequest(method, path, lector)
+	if contenido != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if token != "" {
@@ -136,7 +137,7 @@ func doRequest(t *testing.T, app *fiber.App, method, path, token string, payload
 	return resp
 }
 
-func decodeBody(t *testing.T, resp *http.Response, out any) {
+func decodificarCuerpo(t *testing.T, resp *http.Response, out any) {
 	t.Helper()
 	defer resp.Body.Close()
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
@@ -144,86 +145,86 @@ func decodeBody(t *testing.T, resp *http.Response, out any) {
 	}
 }
 
-func assertErrorCode(t *testing.T, resp *http.Response, wantStatus int, wantCode string) {
+func verificarCodigoError(t *testing.T, resp *http.Response, wantStatus int, wantCode string) {
 	t.Helper()
 
-	var body ErrorResponse
-	decodeBody(t, resp, &body)
+	var cuerpo RespuestaError
+	decodificarCuerpo(t, resp, &cuerpo)
 
 	if resp.StatusCode != wantStatus {
-		t.Errorf("status = %d, se esperaba %d (código %s)", resp.StatusCode, wantStatus, body.Error.Code)
+		t.Errorf("status = %d, se esperaba %d (código %s)", resp.StatusCode, wantStatus, cuerpo.Error.Codigo)
 	}
-	if body.Error.Code != wantCode {
-		t.Errorf("código = %q, se esperaba %q", body.Error.Code, wantCode)
+	if cuerpo.Error.Codigo != wantCode {
+		t.Errorf("código = %q, se esperaba %q", cuerpo.Error.Codigo, wantCode)
 	}
-	if body.Error.Message == "" {
+	if cuerpo.Error.Mensaje == "" {
 		t.Error("el error no trae mensaje legible")
 	}
 }
 
 // --- Autenticación ---------------------------------------------------------
 
-func TestLogin(t *testing.T) {
-	app := NewApp(testConfig("http://unused"), discardLogger())
+func TestIniciarSesion(t *testing.T) {
+	app := NuevaAplicacion(configuracionPrueba("http://unused"), descartarRegistrador())
 
 	cases := []struct {
 		name       string
-		payload    any
+		contenido  any
 		wantStatus int
 		wantCode   string
 	}{
 		{
 			name:       "credenciales válidas",
-			payload:    map[string]string{"username": testUser, "password": testPassword},
+			contenido:  map[string]string{"username": testUser, "password": testPassword},
 			wantStatus: http.StatusOK,
 		},
 		{
 			name:       "contraseña incorrecta",
-			payload:    map[string]string{"username": testUser, "password": "incorrecta"},
+			contenido:  map[string]string{"username": testUser, "password": "incorrecta"},
 			wantStatus: http.StatusUnauthorized,
-			wantCode:   CodeInvalidCredentials,
+			wantCode:   CodigoCredencialesInvalidas,
 		},
 		{
 			name:       "usuario inexistente",
-			payload:    map[string]string{"username": "fantasma", "password": testPassword},
+			contenido:  map[string]string{"username": "fantasma", "password": testPassword},
 			wantStatus: http.StatusUnauthorized,
-			wantCode:   CodeInvalidCredentials,
+			wantCode:   CodigoCredencialesInvalidas,
 		},
 		{
 			name:       "cuerpo vacío",
-			payload:    map[string]string{},
+			contenido:  map[string]string{},
 			wantStatus: http.StatusUnauthorized,
-			wantCode:   CodeInvalidCredentials,
+			wantCode:   CodigoCredencialesInvalidas,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			resp := doRequest(t, app, http.MethodPost, "/api/v1/auth/login", "", tc.payload)
+			resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/auth/login", "", tc.contenido)
 
 			if tc.wantStatus != http.StatusOK {
-				assertErrorCode(t, resp, tc.wantStatus, tc.wantCode)
+				verificarCodigoError(t, resp, tc.wantStatus, tc.wantCode)
 				return
 			}
 
-			var body LoginResponse
-			decodeBody(t, resp, &body)
-			if body.Token == "" {
+			var cuerpo RespuestaInicioSesion
+			decodificarCuerpo(t, resp, &cuerpo)
+			if cuerpo.Token == "" {
 				t.Error("no se devolvió token")
 			}
-			if body.TokenType != "Bearer" {
-				t.Errorf("tokenType = %q, se esperaba \"Bearer\"", body.TokenType)
+			if cuerpo.TipoToken != "Bearer" {
+				t.Errorf("tokenType = %q, se esperaba \"Bearer\"", cuerpo.TipoToken)
 			}
-			if body.ExpiresIn != 900 {
-				t.Errorf("expiresIn = %d, se esperaban 900 segundos", body.ExpiresIn)
+			if cuerpo.ExpiraEnSegundos != 900 {
+				t.Errorf("expiresIn = %d, se esperaban 900 segundos", cuerpo.ExpiraEnSegundos)
 			}
 		})
 	}
 }
 
-func TestProtectedEndpointsRequireToken(t *testing.T) {
-	app := NewApp(testConfig("http://unused"), discardLogger())
-	payload := map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}}
+func TestEndpointsProtegidosExigenToken(t *testing.T) {
+	app := NuevaAplicacion(configuracionPrueba("http://unused"), descartarRegistrador())
+	contenido := map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}}
 
 	cases := []struct {
 		name   string
@@ -237,7 +238,7 @@ func TestProtectedEndpointsRequireToken(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			encoded, _ := json.Marshal(payload)
+			encoded, _ := json.Marshal(contenido)
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/qr", bytes.NewReader(encoded))
 			req.Header.Set("Content-Type", "application/json")
 			if tc.header != "" {
@@ -248,136 +249,136 @@ func TestProtectedEndpointsRequireToken(t *testing.T) {
 			if err != nil {
 				t.Fatalf("app.Test devolvió error: %v", err)
 			}
-			assertErrorCode(t, resp, http.StatusUnauthorized, CodeUnauthorized)
+			verificarCodigoError(t, resp, http.StatusUnauthorized, CodigoNoAutorizado)
 		})
 	}
 }
 
-func TestExpiredTokenIsReported(t *testing.T) {
-	cfg := testConfig("http://unused")
-	cfg.JWTTTL = -time.Minute // el token nace vencido
-	app := NewApp(cfg, discardLogger())
+func TestTokenExpiradoSeInforma(t *testing.T) {
+	cfg := configuracionPrueba("http://unused")
+	cfg.VigenciaJWT = -time.Minute // el token nace vencido
+	app := NuevaAplicacion(cfg, descartarRegistrador())
 
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/auth/login", "",
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/auth/login", "",
 		map[string]string{"username": testUser, "password": testPassword})
-	var loginBody LoginResponse
-	decodeBody(t, resp, &loginBody)
+	var loginBody RespuestaInicioSesion
+	decodificarCuerpo(t, resp, &loginBody)
 
-	resp = doRequest(t, app, http.MethodPost, "/api/v1/qr", loginBody.Token,
+	resp = hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr", loginBody.Token,
 		map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}})
 
-	assertErrorCode(t, resp, http.StatusUnauthorized, CodeTokenExpired)
+	verificarCodigoError(t, resp, http.StatusUnauthorized, CodigoTokenExpirado)
 }
 
 // --- Endpoint QR -----------------------------------------------------------
 
-func TestQRSuccess(t *testing.T) {
-	captured := &capturedRequest{}
-	stub := newStatsStub(t, captured, nil)
-	app := NewApp(testConfig(stub.URL), discardLogger())
-	token := login(t, app)
+func TestQRExitoso(t *testing.T) {
+	captured := &solicitudCapturada{}
+	stub := nuevoSimuladorEstadisticas(t, captured, nil)
+	app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/qr", token,
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr", token,
 		map[string]any{"matrix": [][]float64{{12, -51, 4}, {6, 167, -68}, {-4, 24, -41}}})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, se esperaba 200", resp.StatusCode)
 	}
 
-	var body QRResponse
-	decodeBody(t, resp, &body)
+	var cuerpo RespuestaQR
+	decodificarCuerpo(t, resp, &cuerpo)
 
-	if body.Q.Rows() != 3 || body.Q.Cols() != 3 {
-		t.Errorf("Q es %d×%d, se esperaba 3×3", body.Q.Rows(), body.Q.Cols())
+	if cuerpo.Q.Filas() != 3 || cuerpo.Q.Columnas() != 3 {
+		t.Errorf("Q es %d×%d, se esperaba 3×3", cuerpo.Q.Filas(), cuerpo.Q.Columnas())
 	}
-	if body.R.Rows() != 3 || body.R.Cols() != 3 {
-		t.Errorf("R es %d×%d, se esperaba 3×3", body.R.Rows(), body.R.Cols())
+	if cuerpo.R.Filas() != 3 || cuerpo.R.Columnas() != 3 {
+		t.Errorf("R es %d×%d, se esperaba 3×3", cuerpo.R.Filas(), cuerpo.R.Columnas())
 	}
-	if body.Meta.Algorithm != "householder" {
-		t.Errorf("algorithm = %q", body.Meta.Algorithm)
+	if cuerpo.Metadatos.Algoritmo != "householder" {
+		t.Errorf("algorithm = %q", cuerpo.Metadatos.Algoritmo)
 	}
-	if body.Meta.Mode != "full" {
-		t.Errorf("mode = %q, se esperaba \"full\"", body.Meta.Mode)
+	if cuerpo.Metadatos.Modo != "full" {
+		t.Errorf("mode = %q, se esperaba \"full\"", cuerpo.Metadatos.Modo)
 	}
-	if body.Meta.Residual > 1e-10 {
-		t.Errorf("residual = %g: la factorización no reconstruye la matriz", body.Meta.Residual)
+	if cuerpo.Metadatos.Residuo > 1e-10 {
+		t.Errorf("residual = %g: la factorización no reconstruye la matriz", cuerpo.Metadatos.Residuo)
 	}
-	if body.Meta.RequestID == "" {
+	if cuerpo.Metadatos.IDSolicitud == "" {
 		t.Error("meta no trae requestId")
 	}
-	if body.Statistics == nil {
+	if cuerpo.Estadisticas == nil {
 		t.Fatal("no se adjuntaron las estadísticas del upstream")
 	}
-	if body.Statistics.Overall.Sum != 42 {
-		t.Errorf("sum = %g, se esperaba el valor del upstream simulado (42)", body.Statistics.Overall.Sum)
+	if cuerpo.Estadisticas.Global.Suma != 42 {
+		t.Errorf("sum = %g, se esperaba el valor del upstream simulado (42)", cuerpo.Estadisticas.Global.Suma)
 	}
 }
 
-// TestStatisticsContractIsFullyDecoded verifica que la estructura Go cubra todos
+// TestContratoEstadisticasSeDecodificaCompleto verifica que la estructura Go cubra todos
 // los campos que emite la API Node.
 //
 // Existe porque un desajuste de este tipo no rompe nada de forma visible: los
 // campos que Go no declara se descartan en silencio al deserializar, y el
 // cliente recibe ceros donde debería haber datos. Solo se detecta comparando el
 // contrato campo por campo.
-func TestStatisticsContractIsFullyDecoded(t *testing.T) {
-	stub := newStatsStub(t, nil, nil)
-	app := NewApp(testConfig(stub.URL), discardLogger())
-	token := login(t, app)
+func TestContratoEstadisticasSeDecodificaCompleto(t *testing.T) {
+	stub := nuevoSimuladorEstadisticas(t, nil, nil)
+	app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/qr", token,
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr", token,
 		map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}})
 
-	var body QRResponse
-	decodeBody(t, resp, &body)
+	var cuerpo RespuestaQR
+	decodificarCuerpo(t, resp, &cuerpo)
 
-	stats := body.Statistics
+	stats := cuerpo.Estadisticas
 	if stats == nil {
 		t.Fatal("no se adjuntaron las estadísticas")
 	}
-	if stats.ToleranceFactor != 1e-9 {
+	if stats.FactorTolerancia != 1e-9 {
 		t.Errorf("toleranceFactor = %g, se esperaba 1e-9: el campo no se está deserializando",
-			stats.ToleranceFactor)
+			stats.FactorTolerancia)
 	}
-	if !stats.AnyDiagonal {
+	if !stats.AlgunaDiagonal {
 		t.Error("anyDiagonal = false, el upstream simulado devuelve true")
 	}
 
-	q, ok := stats.PerMatrix["q"]
+	q, ok := stats.PorMatriz["q"]
 	if !ok {
 		t.Fatal("falta la matriz 'q' en perMatrix")
 	}
-	if q.Tolerance != 1e-9 {
+	if q.Tolerancia != 1e-9 {
 		t.Errorf("perMatrix.q.tolerance = %g, se esperaba 1e-9: el campo no se está deserializando",
-			q.Tolerance)
+			q.Tolerancia)
 	}
-	if !q.IsSquare || !q.IsDiagonal {
+	if !q.EsCuadrada || !q.EsDiagonal {
 		t.Errorf("perMatrix.q = %+v: los booleanos no se están deserializando", q)
 	}
-	if q.Rows != 2 || q.Cols != 2 || q.Count != 4 {
-		t.Errorf("perMatrix.q dimensiones = %d×%d (count %d), se esperaba 2×2 (4)", q.Rows, q.Cols, q.Count)
+	if q.Filas != 2 || q.Columnas != 2 || q.Cantidad != 4 {
+		t.Errorf("perMatrix.q dimensiones = %d×%d (count %d), se esperaba 2×2 (4)", q.Filas, q.Columnas, q.Cantidad)
 	}
 }
 
-// TestQRPropagatesHeadersUpstream verifica el contrato entre servicios: la API
+// TestQRPropagaEncabezadosAlServicio verifica el contrato entre servicios: la API
 // Node exige el mismo JWT y usa X-Request-ID para correlacionar sus logs con
 // los de este servicio.
-func TestQRPropagatesHeadersUpstream(t *testing.T) {
-	captured := &capturedRequest{}
-	stub := newStatsStub(t, captured, nil)
-	app := NewApp(testConfig(stub.URL), discardLogger())
-	token := login(t, app)
+func TestQRPropagaEncabezadosAlServicio(t *testing.T) {
+	captured := &solicitudCapturada{}
+	stub := nuevoSimuladorEstadisticas(t, captured, nil)
+	app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
-	doRequest(t, app, http.MethodPost, "/api/v1/qr", token,
+	hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr", token,
 		map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}})
 
-	if captured.calls != 1 {
-		t.Fatalf("el upstream recibió %d llamadas, se esperaba 1", captured.calls)
+	if captured.llamadas != 1 {
+		t.Fatalf("el upstream recibió %d llamadas, se esperaba 1", captured.llamadas)
 	}
-	if captured.authorization != "Bearer "+token {
-		t.Errorf("Authorization propagado = %q, se esperaba el token del cliente", captured.authorization)
+	if captured.autorizacion != "Bearer "+token {
+		t.Errorf("Authorization propagado = %q, se esperaba el token del cliente", captured.autorizacion)
 	}
-	if captured.requestID == "" {
+	if captured.idSolicitud == "" {
 		t.Error("no se propagó X-Request-ID")
 	}
 
@@ -385,7 +386,7 @@ func TestQRPropagatesHeadersUpstream(t *testing.T) {
 	var sent struct {
 		Matrices map[string][][]float64 `json:"matrices"`
 	}
-	if err := json.Unmarshal(captured.body, &sent); err != nil {
+	if err := json.Unmarshal(captured.cuerpo, &sent); err != nil {
 		t.Fatalf("el upstream recibió un cuerpo ilegible: %v", err)
 	}
 	for _, key := range []string{"q", "r"} {
@@ -395,109 +396,109 @@ func TestQRPropagatesHeadersUpstream(t *testing.T) {
 	}
 }
 
-func TestQRWithStatsDisabled(t *testing.T) {
-	captured := &capturedRequest{}
-	stub := newStatsStub(t, captured, nil)
-	app := NewApp(testConfig(stub.URL), discardLogger())
-	token := login(t, app)
+func TestQRSinEstadisticas(t *testing.T) {
+	captured := &solicitudCapturada{}
+	stub := nuevoSimuladorEstadisticas(t, captured, nil)
+	app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/qr?withStats=false", token,
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr?withStats=false", token,
 		map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, se esperaba 200", resp.StatusCode)
 	}
 
-	var body QRResponse
-	decodeBody(t, resp, &body)
-	if body.Statistics != nil {
+	var cuerpo RespuestaQR
+	decodificarCuerpo(t, resp, &cuerpo)
+	if cuerpo.Estadisticas != nil {
 		t.Error("se adjuntaron estadísticas pese a withStats=false")
 	}
-	if captured.calls != 0 {
-		t.Errorf("el upstream fue invocado %d veces, no debía invocarse", captured.calls)
+	if captured.llamadas != 0 {
+		t.Errorf("el upstream fue invocado %d veces, no debía invocarse", captured.llamadas)
 	}
 }
 
-func TestQRReducedMode(t *testing.T) {
-	stub := newStatsStub(t, nil, nil)
-	app := NewApp(testConfig(stub.URL), discardLogger())
-	token := login(t, app)
+func TestQRModoReducido(t *testing.T) {
+	stub := nuevoSimuladorEstadisticas(t, nil, nil)
+	app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/qr?mode=reduced", token,
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr?mode=reduced", token,
 		map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}, {5, 6}, {7, 8}}})
 
-	var body QRResponse
-	decodeBody(t, resp, &body)
+	var cuerpo RespuestaQR
+	decodificarCuerpo(t, resp, &cuerpo)
 
-	if body.Meta.Mode != "reduced" {
-		t.Errorf("mode = %q, se esperaba \"reduced\"", body.Meta.Mode)
+	if cuerpo.Metadatos.Modo != "reduced" {
+		t.Errorf("mode = %q, se esperaba \"reduced\"", cuerpo.Metadatos.Modo)
 	}
 	// La variante reducida recorta Q de 4×4 a 4×2 y R de 4×2 a 2×2.
-	if body.Q.Rows() != 4 || body.Q.Cols() != 2 {
-		t.Errorf("Q es %d×%d, se esperaba 4×2", body.Q.Rows(), body.Q.Cols())
+	if cuerpo.Q.Filas() != 4 || cuerpo.Q.Columnas() != 2 {
+		t.Errorf("Q es %d×%d, se esperaba 4×2", cuerpo.Q.Filas(), cuerpo.Q.Columnas())
 	}
-	if body.R.Rows() != 2 || body.R.Cols() != 2 {
-		t.Errorf("R es %d×%d, se esperaba 2×2", body.R.Rows(), body.R.Cols())
+	if cuerpo.R.Filas() != 2 || cuerpo.R.Columnas() != 2 {
+		t.Errorf("R es %d×%d, se esperaba 2×2", cuerpo.R.Filas(), cuerpo.R.Columnas())
 	}
 }
 
-func TestQRRejectsInvalidInput(t *testing.T) {
-	stub := newStatsStub(t, nil, nil)
-	app := NewApp(testConfig(stub.URL), discardLogger())
-	token := login(t, app)
+func TestQRRechazaEntradaInvalida(t *testing.T) {
+	stub := nuevoSimuladorEstadisticas(t, nil, nil)
+	app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
 	cases := []struct {
-		name     string
-		path     string
-		payload  any
-		wantCode string
+		name      string
+		path      string
+		contenido any
+		wantCode  string
 	}{
 		{
-			name:     "falta el campo matrix",
-			path:     "/api/v1/qr",
-			payload:  map[string]any{},
-			wantCode: CodeInvalidBody,
+			name:      "falta el campo matrix",
+			path:      "/api/v1/qr",
+			contenido: map[string]any{},
+			wantCode:  CodigoCuerpoInvalido,
 		},
 		{
-			name:     "matriz sin filas",
-			path:     "/api/v1/qr",
-			payload:  map[string]any{"matrix": [][]float64{}},
-			wantCode: "EMPTY_MATRIX",
+			name:      "matriz sin filas",
+			path:      "/api/v1/qr",
+			contenido: map[string]any{"matrix": [][]float64{}},
+			wantCode:  "EMPTY_MATRIX",
 		},
 		{
-			name:     "filas de distinto largo",
-			path:     "/api/v1/qr",
-			payload:  map[string]any{"matrix": [][]float64{{1, 2, 3}, {4, 5}}},
-			wantCode: "RAGGED_ROWS",
+			name:      "filas de distinto largo",
+			path:      "/api/v1/qr",
+			contenido: map[string]any{"matrix": [][]float64{{1, 2, 3}, {4, 5}}},
+			wantCode:  "RAGGED_ROWS",
 		},
 		{
 			// Filas nulas: la primera fila no tiene columnas, de modo que la
 			// matriz se descarta como vacía antes de mirar el resto.
-			name:     "filas nulas",
-			path:     "/api/v1/qr",
-			payload:  map[string]any{"matrix": make([][]float64, 4)},
-			wantCode: "EMPTY_MATRIX",
+			name:      "filas nulas",
+			path:      "/api/v1/qr",
+			contenido: map[string]any{"matrix": make([][]float64, 4)},
+			wantCode:  "EMPTY_MATRIX",
 		},
 		{
-			name:     "modo inexistente",
-			path:     "/api/v1/qr?mode=oblicuo",
-			payload:  map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}},
-			wantCode: CodeInvalidBody,
+			name:      "modo inexistente",
+			path:      "/api/v1/qr?mode=oblicuo",
+			contenido: map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}},
+			wantCode:  CodigoCuerpoInvalido,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			resp := doRequest(t, app, http.MethodPost, tc.path, token, tc.payload)
-			assertErrorCode(t, resp, http.StatusBadRequest, tc.wantCode)
+			resp := hacerSolicitudPrueba(t, app, http.MethodPost, tc.path, token, tc.contenido)
+			verificarCodigoError(t, resp, http.StatusBadRequest, tc.wantCode)
 		})
 	}
 }
 
-func TestQRRejectsOversizedMatrix(t *testing.T) {
-	stub := newStatsStub(t, nil, nil)
-	app := NewApp(testConfig(stub.URL), discardLogger()) // MaxMatrixDimension = 8
-	token := login(t, app)
+func TestQRRechazaMatrizDemasiadoGrande(t *testing.T) {
+	stub := nuevoSimuladorEstadisticas(t, nil, nil)
+	app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador()) // DimensionMaximaMatriz = 8
+	token := iniciarSesionPrueba(t, app)
 
 	// 9×9 supera el límite configurado.
 	oversized := make([][]float64, 9)
@@ -505,13 +506,13 @@ func TestQRRejectsOversizedMatrix(t *testing.T) {
 		oversized[i] = make([]float64, 9)
 	}
 
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/qr", token,
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr", token,
 		map[string]any{"matrix": oversized})
 
-	assertErrorCode(t, resp, http.StatusBadRequest, "MATRIX_TOO_LARGE")
+	verificarCodigoError(t, resp, http.StatusBadRequest, "MATRIX_TOO_LARGE")
 }
 
-// TestQRRejectsUnrepresentableNumber documenta dónde se corta un valor que no
+// TestQRRechazaNumeroNoRepresentable documenta dónde se corta un valor que no
 // cabe en un float64.
 //
 // JSON no tiene literales para NaN ni infinito, así que un valor no finito solo
@@ -520,10 +521,10 @@ func TestQRRejectsOversizedMatrix(t *testing.T) {
 // no NON_FINITE_VALUE. Esa validación del paquete matrix sigue siendo útil como
 // defensa en profundidad para quien use el paquete fuera de la capa HTTP, y se
 // prueba en su propio test.
-func TestQRRejectsUnrepresentableNumber(t *testing.T) {
-	stub := newStatsStub(t, nil, nil)
-	app := NewApp(testConfig(stub.URL), discardLogger())
-	token := login(t, app)
+func TestQRRechazaNumeroNoRepresentable(t *testing.T) {
+	stub := nuevoSimuladorEstadisticas(t, nil, nil)
+	app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/qr",
 		bytes.NewReader([]byte(`{"matrix": [[1, 2], [3, 1e400]]}`)))
@@ -534,106 +535,106 @@ func TestQRRejectsUnrepresentableNumber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("app.Test devolvió error: %v", err)
 	}
-	assertErrorCode(t, resp, http.StatusBadRequest, CodeInvalidBody)
+	verificarCodigoError(t, resp, http.StatusBadRequest, CodigoCuerpoInvalido)
 }
 
 // --- Fallos del upstream ---------------------------------------------------
 
-func TestUpstreamFailures(t *testing.T) {
+func TestFallosServicioEstadisticas(t *testing.T) {
 	cases := []struct {
 		name       string
-		handler    http.HandlerFunc
+		manejador  http.HandlerFunc
 		wantStatus int
 		wantCode   string
 	}{
 		{
 			name: "el upstream devuelve 500",
-			handler: func(w http.ResponseWriter, _ *http.Request) {
+			manejador: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
 			},
 			wantStatus: http.StatusBadGateway,
-			wantCode:   CodeUpstreamError,
+			wantCode:   CodigoErrorServicio,
 		},
 		{
 			name: "el upstream rechaza el token",
-			handler: func(w http.ResponseWriter, _ *http.Request) {
+			manejador: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusUnauthorized)
 			},
 			wantStatus: http.StatusBadGateway,
-			wantCode:   CodeUpstreamError,
+			wantCode:   CodigoErrorServicio,
 		},
 		{
 			name: "el upstream devuelve algo que no es JSON",
-			handler: func(w http.ResponseWriter, _ *http.Request) {
+			manejador: func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = io.WriteString(w, "<html>error del proxy</html>")
 			},
 			wantStatus: http.StatusBadGateway,
-			wantCode:   CodeUpstreamUnavailable,
+			wantCode:   CodigoServicioNoDisponible,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			stub := newStatsStub(t, nil, tc.handler)
-			app := NewApp(testConfig(stub.URL), discardLogger())
-			token := login(t, app)
+			stub := nuevoSimuladorEstadisticas(t, nil, tc.manejador)
+			app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador())
+			token := iniciarSesionPrueba(t, app)
 
-			resp := doRequest(t, app, http.MethodPost, "/api/v1/qr", token,
+			resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr", token,
 				map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}})
 
-			assertErrorCode(t, resp, tc.wantStatus, tc.wantCode)
+			verificarCodigoError(t, resp, tc.wantStatus, tc.wantCode)
 		})
 	}
 }
 
-func TestUpstreamUnreachable(t *testing.T) {
+func TestServicioEstadisticasInalcanzable(t *testing.T) {
 	// Puerto cerrado: la conexión se rechaza de inmediato.
-	app := NewApp(testConfig("http://127.0.0.1:1"), discardLogger())
-	token := login(t, app)
+	app := NuevaAplicacion(configuracionPrueba("http://127.0.0.1:1"), descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/qr", token,
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr", token,
 		map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}})
 
-	assertErrorCode(t, resp, http.StatusBadGateway, CodeUpstreamUnavailable)
+	verificarCodigoError(t, resp, http.StatusBadGateway, CodigoServicioNoDisponible)
 }
 
-func TestUpstreamTimeout(t *testing.T) {
-	stub := newStatsStub(t, nil, func(w http.ResponseWriter, _ *http.Request) {
+func TestTiempoAgotadoServicioEstadisticas(t *testing.T) {
+	stub := nuevoSimuladorEstadisticas(t, nil, func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(500 * time.Millisecond)
-		_, _ = io.WriteString(w, fakeStatsResponse)
+		_, _ = io.WriteString(w, respuestaEstadisticasSimulada)
 	})
 
-	cfg := testConfig(stub.URL)
-	cfg.StatsTimeout = 50 * time.Millisecond
-	app := NewApp(cfg, discardLogger())
-	token := login(t, app)
+	cfg := configuracionPrueba(stub.URL)
+	cfg.TiempoEsperaEstadisticas = 50 * time.Millisecond
+	app := NuevaAplicacion(cfg, descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/qr", token,
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr", token,
 		map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}})
 
-	assertErrorCode(t, resp, http.StatusGatewayTimeout, CodeUpstreamTimeout)
+	verificarCodigoError(t, resp, http.StatusGatewayTimeout, CodigoTiempoAgotadoServicio)
 }
 
-// TestUpstreamRetryOnServerError comprueba que un 5xx transitorio se reintente
+// TestReintentoAnteErrorServidor comprueba que un 5xx transitorio se reintente
 // y que el segundo intento pueda tener éxito.
-func TestUpstreamRetryOnServerError(t *testing.T) {
+func TestReintentoAnteErrorServidor(t *testing.T) {
 	attempts := 0
-	stub := newStatsStub(t, nil, func(w http.ResponseWriter, _ *http.Request) {
+	stub := nuevoSimuladorEstadisticas(t, nil, func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
 		if attempts == 1 {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, fakeStatsResponse)
+		_, _ = io.WriteString(w, respuestaEstadisticasSimulada)
 	})
 
-	cfg := testConfig(stub.URL)
-	cfg.StatsMaxRetries = 1
-	app := NewApp(cfg, discardLogger())
-	token := login(t, app)
+	cfg := configuracionPrueba(stub.URL)
+	cfg.MaximoReintentosEstadisticas = 1
+	app := NuevaAplicacion(cfg, descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/qr", token,
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr", token,
 		map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}})
 
 	if resp.StatusCode != http.StatusOK {
@@ -644,21 +645,21 @@ func TestUpstreamRetryOnServerError(t *testing.T) {
 	}
 }
 
-// TestUpstreamDoesNotRetryClientError verifica que un 4xx no se reintente:
+// TestNoReintentaErrorCliente verifica que un 4xx no se reintente:
 // repetir un request mal formado solo gastaría tiempo y carga.
-func TestUpstreamDoesNotRetryClientError(t *testing.T) {
+func TestNoReintentaErrorCliente(t *testing.T) {
 	attempts := 0
-	stub := newStatsStub(t, nil, func(w http.ResponseWriter, _ *http.Request) {
+	stub := nuevoSimuladorEstadisticas(t, nil, func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
 		w.WriteHeader(http.StatusBadRequest)
 	})
 
-	cfg := testConfig(stub.URL)
-	cfg.StatsMaxRetries = 3
-	app := NewApp(cfg, discardLogger())
-	token := login(t, app)
+	cfg := configuracionPrueba(stub.URL)
+	cfg.MaximoReintentosEstadisticas = 3
+	app := NuevaAplicacion(cfg, descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
-	doRequest(t, app, http.MethodPost, "/api/v1/qr", token,
+	hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/qr", token,
 		map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}})
 
 	if attempts != 1 {
@@ -668,96 +669,190 @@ func TestUpstreamDoesNotRetryClientError(t *testing.T) {
 
 // --- Endpoint de rotación --------------------------------------------------
 
-func TestRotate(t *testing.T) {
-	app := NewApp(testConfig("http://unused"), discardLogger())
-	token := login(t, app)
+func TestRotar(t *testing.T) {
+	captured := &solicitudCapturada{}
+	stub := nuevoSimuladorEstadisticas(t, captured, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+  "overall": {"max": 6, "min": 1, "average": 3.5, "sum": 21, "count": 6},
+  "perMatrix": {
+    "rotated": {"max": 6, "min": 1, "average": 3.5, "sum": 21, "count": 6, "rows": 3, "cols": 2, "isSquare": false, "isDiagonal": false, "tolerance": 6e-9}
+  },
+  "anyDiagonal": false,
+  "toleranceFactor": 1e-9
+}`)
+	})
+	app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
 
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/rotate", token,
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/rotate", token,
 		map[string]any{"matrix": [][]float64{{1, 2, 3}, {4, 5, 6}}})
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, se esperaba 200", resp.StatusCode)
 	}
 
-	var body RotateResponse
-	decodeBody(t, resp, &body)
+	var cuerpo RespuestaRotacion
+	decodificarCuerpo(t, resp, &cuerpo)
 
 	want := [][]float64{{4, 1}, {5, 2}, {6, 3}}
-	if body.Rotated.Rows() != 3 || body.Rotated.Cols() != 2 {
-		t.Fatalf("la rotada es %d×%d, se esperaba 3×2", body.Rotated.Rows(), body.Rotated.Cols())
+	if cuerpo.Rotada.Filas() != 3 || cuerpo.Rotada.Columnas() != 2 {
+		t.Fatalf("la rotada es %d×%d, se esperaba 3×2", cuerpo.Rotada.Filas(), cuerpo.Rotada.Columnas())
 	}
 	for i := range want {
 		for j := range want[i] {
-			if body.Rotated[i][j] != want[i][j] {
-				t.Errorf("rotada[%d][%d] = %g, se esperaba %g", i, j, body.Rotated[i][j], want[i][j])
+			if cuerpo.Rotada[i][j] != want[i][j] {
+				t.Errorf("rotada[%d][%d] = %g, se esperaba %g", i, j, cuerpo.Rotada[i][j], want[i][j])
 			}
 		}
 	}
-	if body.Meta.Degrees != 90 || body.Meta.Direction != "clockwise" {
-		t.Errorf("meta = %+v, se esperaba rotación de 90° en sentido horario", body.Meta)
+	if cuerpo.Metadatos.Grados != 90 || cuerpo.Metadatos.Direccion != "clockwise" {
+		t.Errorf("meta = %+v, se esperaba rotación de 90° en sentido horario", cuerpo.Metadatos)
+	}
+	if cuerpo.Estadisticas == nil {
+		t.Fatal("la respuesta no incluyó las estadísticas de la matriz rotada")
+	}
+	if _, ok := cuerpo.Estadisticas.PorMatriz["rotated"]; !ok {
+		t.Errorf("perMatrix = %+v, se esperaba la clave rotated", cuerpo.Estadisticas.PorMatriz)
+	}
+
+	var upstreamBody struct {
+		Matrices map[string][][]float64 `json:"matrices"`
+	}
+	if err := json.Unmarshal(captured.cuerpo, &upstreamBody); err != nil {
+		t.Fatalf("el cuerpo enviado a Node no es JSON válido: %v", err)
+	}
+	upstreamRotated, ok := upstreamBody.Matrices["rotated"]
+	if !ok {
+		t.Fatalf("la API Go no envió la matriz rotada a Node: %s", captured.cuerpo)
+	}
+	if len(upstreamRotated) != 3 || len(upstreamRotated[0]) != 2 || upstreamRotated[0][0] != 4 {
+		t.Errorf("matriz enviada a Node = %v, se esperaba la rotación 3×2", upstreamRotated)
+	}
+	if captured.autorizacion != "Bearer "+token {
+		t.Errorf("Authorization no se propagó a Node")
+	}
+	if captured.idSolicitud == "" {
+		t.Error("X-Request-ID no se propagó a Node")
+	}
+}
+
+func TestRotarSinEstadisticas(t *testing.T) {
+	captured := &solicitudCapturada{}
+	stub := nuevoSimuladorEstadisticas(t, captured, nil)
+	app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador())
+	token := iniciarSesionPrueba(t, app)
+
+	resp := hacerSolicitudPrueba(t, app, http.MethodPost, "/api/v1/rotate?withStats=false", token,
+		map[string]any{"matrix": [][]float64{{1, 2}, {3, 4}}})
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, se esperaba 200", resp.StatusCode)
+	}
+	var cuerpo RespuestaRotacion
+	decodificarCuerpo(t, resp, &cuerpo)
+	if cuerpo.Estadisticas != nil {
+		t.Error("statistics debe omitirse con withStats=false")
+	}
+	if captured.llamadas != 0 {
+		t.Errorf("Node recibió %d llamadas, se esperaban 0", captured.llamadas)
 	}
 }
 
 // --- Salud y rutas ---------------------------------------------------------
 
-func TestHealthIsPublic(t *testing.T) {
-	app := NewApp(testConfig("http://127.0.0.1:1"), discardLogger())
+func TestSaludEsPublica(t *testing.T) {
+	app := NuevaAplicacion(configuracionPrueba("http://127.0.0.1:1"), descartarRegistrador())
 
-	resp := doRequest(t, app, http.MethodGet, "/health", "", nil)
+	resp := hacerSolicitudPrueba(t, app, http.MethodGet, "/health", "", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, se esperaba 200 sin token", resp.StatusCode)
 	}
 
-	var body HealthResponse
-	decodeBody(t, resp, &body)
-	if body.Status != "ok" {
-		t.Errorf("status = %q, se esperaba \"ok\"", body.Status)
+	var cuerpo RespuestaSalud
+	decodificarCuerpo(t, resp, &cuerpo)
+	if cuerpo.Estado != "ok" {
+		t.Errorf("status = %q, se esperaba \"ok\"", cuerpo.Estado)
 	}
-	if body.Service != "qr-api-go" {
-		t.Errorf("service = %q", body.Service)
+	if cuerpo.Servicio != "qr-api-go" {
+		t.Errorf("service = %q", cuerpo.Servicio)
 	}
 }
 
-// TestReadinessReflectsUpstream comprueba que liveness y readiness respondan
+func TestCabecerasDeSeguridad(t *testing.T) {
+	app := NuevaAplicacion(configuracionPrueba("http://127.0.0.1:1"), descartarRegistrador())
+
+	resp := hacerSolicitudPrueba(t, app, http.MethodGet, "/health", "", nil)
+	if valor := resp.Header.Get("X-Content-Type-Options"); valor != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, se esperaba nosniff", valor)
+	}
+	if valor := resp.Header.Get("X-Frame-Options"); valor == "" {
+		t.Error("X-Frame-Options debe estar presente")
+	}
+}
+
+func TestCORSRestringeOrigenes(t *testing.T) {
+	app := NuevaAplicacion(configuracionPrueba("http://127.0.0.1:1"), descartarRegistrador())
+
+	probarOrigen := func(origen string) string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		req.Header.Set("Origin", origen)
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("app.Test devolvió error: %v", err)
+		}
+		return resp.Header.Get("Access-Control-Allow-Origin")
+	}
+
+	if valor := probarOrigen("https://permitido.ejemplo.cl"); valor != "https://permitido.ejemplo.cl" {
+		t.Errorf("origen permitido recibió Access-Control-Allow-Origin = %q", valor)
+	}
+	if valor := probarOrigen("https://bloqueado.ejemplo.cl"); valor != "" {
+		t.Errorf("origen bloqueado recibió Access-Control-Allow-Origin = %q", valor)
+	}
+}
+
+// TestDisponibilidadReflejaServicioDependiente comprueba que liveness y readiness respondan
 // distinto: el servicio está vivo aunque su dependencia no lo esté.
-func TestReadinessReflectsUpstream(t *testing.T) {
+func TestDisponibilidadReflejaServicioDependiente(t *testing.T) {
 	t.Run("upstream disponible", func(t *testing.T) {
-		stub := newStatsStub(t, nil, func(w http.ResponseWriter, _ *http.Request) {
+		stub := nuevoSimuladorEstadisticas(t, nil, func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = io.WriteString(w, `{"status":"ok"}`)
 		})
-		app := NewApp(testConfig(stub.URL), discardLogger())
+		app := NuevaAplicacion(configuracionPrueba(stub.URL), descartarRegistrador())
 
-		resp := doRequest(t, app, http.MethodGet, "/health/ready", "", nil)
+		resp := hacerSolicitudPrueba(t, app, http.MethodGet, "/health/ready", "", nil)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d, se esperaba 200", resp.StatusCode)
 		}
 	})
 
 	t.Run("upstream caído", func(t *testing.T) {
-		app := NewApp(testConfig("http://127.0.0.1:1"), discardLogger())
+		app := NuevaAplicacion(configuracionPrueba("http://127.0.0.1:1"), descartarRegistrador())
 
-		resp := doRequest(t, app, http.MethodGet, "/health/ready", "", nil)
+		resp := hacerSolicitudPrueba(t, app, http.MethodGet, "/health/ready", "", nil)
 		if resp.StatusCode != http.StatusServiceUnavailable {
 			t.Errorf("status = %d, se esperaba 503", resp.StatusCode)
 		}
 
-		var body HealthResponse
-		decodeBody(t, resp, &body)
-		if body.Upstream != "unreachable" {
-			t.Errorf("upstream = %q, se esperaba \"unreachable\"", body.Upstream)
+		var cuerpo RespuestaSalud
+		decodificarCuerpo(t, resp, &cuerpo)
+		if cuerpo.ServicioDependiente != "unreachable" {
+			t.Errorf("upstream = %q, se esperaba \"unreachable\"", cuerpo.ServicioDependiente)
 		}
 	})
 }
 
-func TestUnknownRouteReturnsStructuredError(t *testing.T) {
-	app := NewApp(testConfig("http://unused"), discardLogger())
+func TestRutaDesconocidaDevuelveErrorEstructurado(t *testing.T) {
+	app := NuevaAplicacion(configuracionPrueba("http://unused"), descartarRegistrador())
 
-	resp := doRequest(t, app, http.MethodGet, "/api/v1/inexistente", "", nil)
+	resp := hacerSolicitudPrueba(t, app, http.MethodGet, "/api/v1/inexistente", "", nil)
 
-	assertErrorCode(t, resp, http.StatusNotFound, CodeNotFound)
+	verificarCodigoError(t, resp, http.StatusNotFound, CodigoNoEncontrado)
 }
 
-func TestBearerToken(t *testing.T) {
+func TestTokenBearer(t *testing.T) {
 	cases := []struct {
 		name    string
 		header  string
@@ -776,7 +871,7 @@ func TestBearerToken(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := bearerToken(tc.header)
+			got, err := extraerTokenBearer(tc.header)
 
 			if tc.wantErr {
 				if err == nil {

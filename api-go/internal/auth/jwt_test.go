@@ -14,14 +14,14 @@ const (
 	testAudience = "test-audience"
 )
 
-func newTestManager(ttl time.Duration) *Manager {
-	return NewManager(testSecret, testIssuer, testAudience, ttl)
+func nuevoGestorPrueba(ttl time.Duration) *Gestor {
+	return NuevoGestor(testSecret, testIssuer, testAudience, ttl)
 }
 
-func TestIssueAndVerify(t *testing.T) {
-	m := newTestManager(15 * time.Minute)
+func TestEmitirYVerificar(t *testing.T) {
+	m := nuevoGestorPrueba(15 * time.Minute)
 
-	token, expiresAt, err := m.Issue("demo")
+	token, expiresAt, err := m.Emitir("demo")
 	if err != nil {
 		t.Fatalf("Issue devolvió error: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestIssueAndVerify(t *testing.T) {
 		t.Errorf("el token nace expirado: expiresAt = %v", expiresAt)
 	}
 
-	subject, err := m.Verify(token)
+	subject, err := m.Verificar(token)
 	if err != nil {
 		t.Fatalf("Verify rechazó un token recién emitido: %v", err)
 	}
@@ -41,36 +41,36 @@ func TestIssueAndVerify(t *testing.T) {
 	}
 }
 
-func TestVerifyRejectsExpiredToken(t *testing.T) {
+func TestVerificarRechazaTokenExpirado(t *testing.T) {
 	// TTL negativo: el token nace vencido, sin necesidad de esperar en el test.
-	m := newTestManager(-time.Minute)
+	m := nuevoGestorPrueba(-time.Minute)
 
-	token, _, err := m.Issue("demo")
+	token, _, err := m.Emitir("demo")
 	if err != nil {
 		t.Fatalf("Issue devolvió error: %v", err)
 	}
 
-	_, err = m.Verify(token)
-	if !errors.Is(err, ErrTokenExpired) {
-		t.Errorf("error = %v, se esperaba ErrTokenExpired", err)
+	_, err = m.Verificar(token)
+	if !errors.Is(err, ErrTokenExpirado) {
+		t.Errorf("error = %v, se esperaba ErrTokenExpirado", err)
 	}
 }
 
-func TestVerifyRejectsWrongSecret(t *testing.T) {
-	issuer := newTestManager(time.Hour)
-	token, _, _ := issuer.Issue("demo")
+func TestVerificarRechazaSecretoIncorrecto(t *testing.T) {
+	issuer := nuevoGestorPrueba(time.Hour)
+	token, _, _ := issuer.Emitir("demo")
 
-	verifier := NewManager("otro-secreto-distinto", testIssuer, testAudience, time.Hour)
+	verifier := NuevoGestor("otro-secreto-distinto", testIssuer, testAudience, time.Hour)
 
-	if _, err := verifier.Verify(token); !errors.Is(err, ErrTokenInvalid) {
-		t.Errorf("error = %v, se esperaba ErrTokenInvalid", err)
+	if _, err := verifier.Verificar(token); !errors.Is(err, ErrTokenInvalido) {
+		t.Errorf("error = %v, se esperaba ErrTokenInvalido", err)
 	}
 }
 
-// TestVerifyRejectsAlgNone cubre el ataque clásico contra JWT: presentar un
+// TestVerificarRechazaAlgoritmoNulo cubre el ataque clásico contra JWT: presentar un
 // token con `alg: none` y sin firma para que el verificador lo acepte. La
 // restricción explícita de algoritmos en Verify debe bloquearlo.
-func TestVerifyRejectsAlgNone(t *testing.T) {
+func TestVerificarRechazaAlgoritmoNulo(t *testing.T) {
 	claims := jwt.RegisteredClaims{
 		Subject:   "atacante",
 		Issuer:    testIssuer,
@@ -83,12 +83,12 @@ func TestVerifyRejectsAlgNone(t *testing.T) {
 		t.Fatalf("no se pudo construir el token del caso de prueba: %v", err)
 	}
 
-	if _, err := newTestManager(time.Hour).Verify(unsigned); err == nil {
+	if _, err := nuevoGestorPrueba(time.Hour).Verificar(unsigned); err == nil {
 		t.Fatal("se aceptó un token firmado con alg=none")
 	}
 }
 
-func TestVerifyRejectsWrongIssuerAndAudience(t *testing.T) {
+func TestVerificarRechazaEmisorYAudienciaIncorrectos(t *testing.T) {
 	cases := []struct {
 		name             string
 		issuer, audience string
@@ -99,17 +99,17 @@ func TestVerifyRejectsWrongIssuerAndAudience(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			foreign := NewManager(testSecret, tc.issuer, tc.audience, time.Hour)
-			token, _, _ := foreign.Issue("demo")
+			foreign := NuevoGestor(testSecret, tc.issuer, tc.audience, time.Hour)
+			token, _, _ := foreign.Emitir("demo")
 
-			if _, err := newTestManager(time.Hour).Verify(token); !errors.Is(err, ErrTokenInvalid) {
-				t.Errorf("error = %v, se esperaba ErrTokenInvalid", err)
+			if _, err := nuevoGestorPrueba(time.Hour).Verificar(token); !errors.Is(err, ErrTokenInvalido) {
+				t.Errorf("error = %v, se esperaba ErrTokenInvalido", err)
 			}
 		})
 	}
 }
 
-func TestVerifyRejectsMalformedToken(t *testing.T) {
+func TestVerificarRechazaTokenMalformado(t *testing.T) {
 	cases := []string{
 		"",
 		"no-es-un-jwt",
@@ -117,19 +117,19 @@ func TestVerifyRejectsMalformedToken(t *testing.T) {
 		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vIn0", // sin firma
 	}
 
-	m := newTestManager(time.Hour)
+	m := nuevoGestorPrueba(time.Hour)
 	for _, token := range cases {
 		t.Run(token, func(t *testing.T) {
-			if _, err := m.Verify(token); err == nil {
+			if _, err := m.Verificar(token); err == nil {
 				t.Errorf("se aceptó el token malformado %q", token)
 			}
 		})
 	}
 }
 
-func TestTTL(t *testing.T) {
+func TestVigencia(t *testing.T) {
 	want := 42 * time.Minute
-	if got := newTestManager(want).TTL(); got != want {
+	if got := nuevoGestorPrueba(want).Vigencia(); got != want {
 		t.Errorf("TTL = %v, se esperaba %v", got, want)
 	}
 }

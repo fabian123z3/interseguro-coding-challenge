@@ -2,31 +2,31 @@ package matrix
 
 import "math"
 
-// Mode selecciona la variante de factorización QR a calcular.
-type Mode string
+// Modo selecciona la variante de factorización QR a calcular.
+type Modo string
 
 const (
-	// ModeFull produce la factorización completa: Q de m×m (ortogonal) y R de
+	// ModoCompleto produce la factorización completa: Q de m×m (ortogonal) y R de
 	// m×n (triangular superior). Es la definición canónica y la que se usa por
 	// defecto, porque está definida para cualquier matriz rectangular.
-	ModeFull Mode = "full"
+	ModoCompleto Modo = "full"
 
-	// ModeReduced produce la factorización reducida ("thin"): cuando m > n,
+	// ModoReducido produce la factorización reducida ("thin"): cuando m > n,
 	// Q queda de m×n y R de n×n, descartando las columnas de Q que no aportan
 	// al producto. Cuando m ≤ n ambas variantes coinciden.
-	ModeReduced Mode = "reduced"
+	ModoReducido Modo = "reduced"
 )
 
-// Decomposition es el resultado de factorizar A = Q·R.
-type Decomposition struct {
-	Q Matrix
-	R Matrix
-	// Mode es la variante efectivamente aplicada.
-	Mode Mode
-	// Residual es el error relativo de reconstrucción ‖Q·R − A‖_F / ‖A‖_F.
+// Descomposicion es el resultado de factorizar A = Q·R.
+type Descomposicion struct {
+	Q Matriz
+	R Matriz
+	// Modo es la variante efectivamente aplicada.
+	Modo Modo
+	// Residuo es el error relativo de reconstrucción ‖Q·R − A‖_F / ‖A‖_F.
 	// Se expone en la respuesta como evidencia verificable de que el resultado
 	// es correcto: en aritmética de doble precisión debe rondar 1e-16.
-	Residual float64
+	Residuo float64
 }
 
 // QR factoriza A = Q·R usando reflexiones de Householder.
@@ -42,11 +42,11 @@ type Decomposition struct {
 //
 // La matriz de entrada no se modifica. Complejidad: O(m·n²) en tiempo para R
 // y O(m²·n) para acumular Q explícitamente.
-func QR(a Matrix, mode Mode) Decomposition {
-	m, n := a.Rows(), a.Cols()
+func QR(a Matriz, modo Modo) Descomposicion {
+	m, n := a.Filas(), a.Columnas()
 
-	r := a.Clone()
-	q := Identity(m)
+	r := a.Clonar()
+	q := Identidad(m)
 
 	// v es el vector de Householder del paso actual. Se reserva una sola vez y
 	// se reutiliza en cada iteración: solo el tramo v[k:m] es significativo.
@@ -62,8 +62,8 @@ func QR(a Matrix, mode Mode) Decomposition {
 			v[i] = r[i][k]
 		}
 
-		normX := norm2(v[k:m])
-		if normX == 0 {
+		normaX := norma2(v[k:m])
+		if normaX == 0 {
 			// La columna ya es nula bajo la diagonal: no hay nada que reflejar.
 			continue
 		}
@@ -71,16 +71,16 @@ func QR(a Matrix, mode Mode) Decomposition {
 		// alpha = −signo(x₀)·‖x‖. Elegir el signo opuesto a x₀ maximiza |v₀| y
 		// evita la cancelación catastrófica que ocurriría si x₀ ya estuviera
 		// cerca de ‖x‖ y los restáramos.
-		alpha := -math.Copysign(normX, v[k])
+		alfa := -math.Copysign(normaX, v[k])
 
 		// v = x − alpha·e₁, luego normalizado a ‖v‖ = 1.
-		v[k] -= alpha
-		normV := norm2(v[k:m])
-		if normV == 0 {
+		v[k] -= alfa
+		normaV := norma2(v[k:m])
+		if normaV == 0 {
 			continue
 		}
 		for i := k; i < m; i++ {
-			v[i] /= normV
+			v[i] /= normaV
 		}
 
 		// R ← H_k·R, aplicado solo al bloque activo [k:m]×[k:n].
@@ -121,80 +121,80 @@ func QR(a Matrix, mode Mode) Decomposition {
 		}
 	}
 
-	effectiveMode := ModeFull
-	if mode == ModeReduced {
-		effectiveMode = ModeReduced
+	modoEfectivo := ModoCompleto
+	if modo == ModoReducido {
+		modoEfectivo = ModoReducido
 		if m > n {
 			// Se conservan las primeras n columnas de Q y las primeras n filas
 			// de R; el resto solo multiplica el bloque nulo inferior de R.
-			thinQ := New(m, n)
+			qReducida := Nueva(m, n)
 			for i := 0; i < m; i++ {
-				copy(thinQ[i], q[i][:n])
+				copy(qReducida[i], q[i][:n])
 			}
-			thinR := New(n, n)
+			rReducida := Nueva(n, n)
 			for i := 0; i < n; i++ {
-				copy(thinR[i], r[i])
+				copy(rReducida[i], r[i])
 			}
-			q, r = thinQ, thinR
+			q, r = qReducida, rReducida
 		}
 	}
 
-	q.scrubNegativeZero()
-	r.scrubNegativeZero()
+	q.normalizarCeroNegativo()
+	r.normalizarCeroNegativo()
 
-	return Decomposition{
-		Q:        q,
-		R:        r,
-		Mode:     effectiveMode,
-		Residual: Residual(a, q, r),
+	return Descomposicion{
+		Q:       q,
+		R:       r,
+		Modo:    modoEfectivo,
+		Residuo: CalcularResiduo(a, q, r),
 	}
 }
 
-// Residual devuelve el error relativo de reconstrucción ‖Q·R − A‖_F / ‖A‖_F.
+// CalcularResiduo devuelve el error relativo de reconstrucción ‖Q·R − A‖_F / ‖A‖_F.
 // Devuelve 0 cuando A es la matriz nula, caso en que el error relativo no está
 // definido y el absoluto es necesariamente cero.
-func Residual(a, q, r Matrix) float64 {
-	product := q.Mul(r)
-	if product == nil {
+func CalcularResiduo(a, q, r Matriz) float64 {
+	producto := q.Multiplicar(r)
+	if producto == nil {
 		return math.NaN()
 	}
 
-	var diffSq, refSq float64
+	var diferenciaCuadrada, referenciaCuadrada float64
 	for i := range a {
 		for j := range a[i] {
-			d := product[i][j] - a[i][j]
-			diffSq += d * d
-			refSq += a[i][j] * a[i][j]
+			diferencia := producto[i][j] - a[i][j]
+			diferenciaCuadrada += diferencia * diferencia
+			referenciaCuadrada += a[i][j] * a[i][j]
 		}
 	}
-	if refSq == 0 {
+	if referenciaCuadrada == 0 {
 		return 0
 	}
-	return math.Sqrt(diffSq / refSq)
+	return math.Sqrt(diferenciaCuadrada / referenciaCuadrada)
 }
 
-// norm2 calcula la norma euclidiana ‖x‖₂ con escalado previo.
+// norma2 calcula la norma euclidiana ‖x‖₂ con escalado previo.
 //
 // La suma directa de cuadrados desbordaría con valores del orden de 1e200 y se
 // anularía por underflow con valores del orden de 1e-200, aun cuando la norma
 // resultante fuese perfectamente representable. Dividir por el mayor valor
 // absoluto antes de elevar al cuadrado evita ambos extremos; es la misma
 // estrategia que usa la rutina DNRM2 de LAPACK.
-func norm2(x []float64) float64 {
-	scale := 0.0
+func norma2(x []float64) float64 {
+	escala := 0.0
 	for _, v := range x {
-		if a := math.Abs(v); a > scale {
-			scale = a
+		if absoluto := math.Abs(v); absoluto > escala {
+			escala = absoluto
 		}
 	}
-	if scale == 0 {
+	if escala == 0 {
 		return 0
 	}
 
-	sum := 0.0
+	suma := 0.0
 	for _, v := range x {
-		t := v / scale
-		sum += t * t
+		termino := v / escala
+		suma += termino * termino
 	}
-	return scale * math.Sqrt(sum)
+	return escala * math.Sqrt(suma)
 }

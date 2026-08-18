@@ -95,7 +95,7 @@ Factoriza la matriz y adjunta las estadísticas calculadas por la API Node.
 
 `meta.residual` es el error relativo de reconstrucción `‖Q·R − A‖_F / ‖A‖_F`. En doble precisión ronda 1e-16; sirve para comprobar el resultado sin confiar en el servicio.
 
-Los elementos bajo la diagonal de `R` son ceros exactos, no residuos de redondeo: ver la decisión 4 en [DECISIONS.md](DECISIONS.md).
+Los elementos bajo la diagonal de `R` son ceros exactos, no residuos de redondeo: ver la decisión 4 en [DECISIONES.md](DECISIONES.md).
 
 **Errores**
 
@@ -120,7 +120,7 @@ Los elementos bajo la diagonal de `R` son ceros exactos, no residuos de redondeo
 
 ## `POST /api/v1/rotate`
 
-Rota la matriz 90° en sentido horario. Existe para cubrir la lectura alternativa del enunciado; ver la decisión 1 en [DECISIONS.md](DECISIONS.md).
+Rota la matriz 90° en sentido horario y envía el resultado a la API Node para calcular sus estadísticas. Ver la decisión 1 en [DECISIONES.md](DECISIONES.md).
 
 **Autenticación:** `Authorization: Bearer <token>`
 
@@ -135,11 +135,23 @@ Rota la matriz 90° en sentido horario. Existe para cubrir la lectura alternativ
 ```json
 {
   "rotated": [[4, 1], [5, 2], [6, 3]],
-  "meta": { "rows": 3, "cols": 2, "direction": "clockwise", "degrees": 90, "requestId": "…" }
+  "meta": { "rows": 3, "cols": 2, "direction": "clockwise", "degrees": 90, "requestId": "…" },
+  "statistics": {
+    "overall": { "max": 6, "min": 1, "average": 3.5, "sum": 21, "count": 6 },
+    "perMatrix": {
+      "rotated": {
+        "max": 6, "min": 1, "average": 3.5, "sum": 21, "count": 6,
+        "rows": 3, "cols": 2, "isSquare": false, "isDiagonal": false,
+        "tolerance": 6e-9
+      }
+    },
+    "anyDiagonal": false,
+    "toleranceFactor": 1e-9
+  }
 }
 ```
 
-Los errores de validación son los mismos que en `/api/v1/qr`.
+Los errores de validación y de comunicación con Node son los mismos que en `/api/v1/qr`. `?withStats=false` omite la llamada a Node y el campo `statistics`, para diagnóstico aislado.
 
 ---
 
@@ -200,7 +212,7 @@ Las claves del objeto `matrices` son libres; la API Go envía `q` y `r`.
 
 `overall` responde lo que pide el enunciado: máximo, mínimo, promedio y suma total sobre **todas** las matrices. `perMatrix` es el desglose, que responde la pregunta inmediata siguiente —de cuál de las dos viene cada extremo— y no cuesta nada porque el recorrido ya está hecho.
 
-`tolerance` es el umbral con que se evaluó `isDiagonal` en esa matriz, derivado de su propia magnitud: `max(1e-12, toleranceFactor · max|aᵢⱼ|)`. Difiere entre `Q` y `R` a propósito; ver la decisión 5 en [DECISIONS.md](DECISIONS.md).
+`tolerance` es el umbral con que se evaluó `isDiagonal` en esa matriz, derivado de su propia magnitud: `max(1e-12, toleranceFactor · max|aᵢⱼ|)`. Difiere entre `Q` y `R` a propósito; ver la decisión 5 en [DECISIONES.md](DECISIONES.md).
 
 **Errores**
 

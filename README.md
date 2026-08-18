@@ -2,9 +2,9 @@
 
 Dos APIs REST que se comunican por HTTP, más un frontend que las consume.
 
-- **API Go (Fiber)** — recibe una matriz rectangular, calcula su **factorización QR** por reflexiones de Householder y envía las matrices resultantes a la segunda API.
-- **API Node.js (Express + TypeScript)** — recibe esas matrices y calcula **máximo, mínimo, promedio, suma total** y si **alguna es diagonal**.
-- **Frontend (React + Vite)** — pantalla de acceso, editor de matriz y visualización del resultado como la ecuación `A = Q · R`.
+- **API Go (Fiber)** — recibe una matriz rectangular, calcula su **factorización QR** por reflexiones de Householder o la **rota 90°**, y envía el resultado a la segunda API.
+- **API Node.js (Express + TypeScript)** — recibe las matrices resultantes y calcula **máximo, mínimo, promedio, suma total** y si **alguna es diagonal**.
+- **Frontend (React + Vite)** — pantalla de acceso, editor, selector de operación y visualización de la factorización o rotación.
 
 Todo va contenerizado, protegido con JWT y cubierto por pruebas unitarias y de integración.
 
@@ -44,8 +44,8 @@ Credenciales de demostración: usuario `demo`, contraseña `demo1234` (definidas
                ▼
    ┌─────────────────────────┐
    │  api-go  ·  Fiber :8080 │   POST /api/v1/auth/login   emite el JWT
-   │                         │   POST /api/v1/qr           Householder QR
-   │                         │   POST /api/v1/rotate       rotación 90°
+   │                         │   POST /api/v1/qr           QR → Node
+   │                         │   POST /api/v1/rotate       rotación → Node
    └───────────┬─────────────┘
                │  HTTP · propaga Authorization y X-Request-ID
                ▼
@@ -54,7 +54,7 @@ Credenciales de demostración: usuario `demo`, contraseña `demo1234` (definidas
    └─────────────────────────┘
 ```
 
-**Flujo de una factorización:** el frontend pide el token → envía la matriz a la API Go → esta valida, factoriza y llama a la API Node con `{matrices: {q, r}}` → compone la respuesta final con `q`, `r`, `meta` y `statistics`.
+**Flujo de una operación:** el frontend pide el token y envía la matriz a la API Go. Para QR, Go llama a Node con `{matrices: {q, r}}`; para rotación, con `{matrices: {rotated}}`. Luego compone la respuesta final con el resultado, sus metadatos y `statistics`.
 
 El `X-Request-ID` viaja por toda la cadena, así que una sola búsqueda en los logs reconstruye la traza completa a través de ambos servicios.
 
@@ -76,6 +76,14 @@ curl -s -X POST http://localhost:8080/api/v1/qr -H "Content-Type: application/js
 
 La respuesta trae `q`, `r`, `meta` y `statistics`. En `meta.residual` va el error relativo de reconstrucción `‖Q·R − A‖ / ‖A‖`: ronda `1e-16`, y es la forma de comprobar que el resultado es correcto sin confiar en el servicio.
 
+Rotar 90° en sentido horario:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/rotate -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"matrix":[[1,2,3],[4,5,6]]}'
+```
+
+La respuesta trae `rotated`, `meta` y las estadísticas de la matriz rotada.
+
 El contrato completo, con todos los códigos de error, está en [docs/API.md](docs/API.md).
 
 ---
@@ -87,7 +95,7 @@ El contrato completo, con todos los códigos de error, está en [docs/API.md](do
 ├── docker-compose.yml          orquestación de los tres servicios
 ├── .env.example                configuración compartida
 ├── docs/
-│   ├── DECISIONS.md            decisiones de diseño y su justificación
+│   ├── DECISIONES.md           decisiones de diseño y su justificación
 │   ├── API.md                  contrato de ambas APIs
 │   └── DEPLOY.md               despliegue en la nube
 ├── api-go/
@@ -161,9 +169,9 @@ Las pruebas de QR verifican **propiedades**, no valores precalculados: la factor
 
 ## Decisiones destacadas
 
-El detalle y la justificación de cada una está en [docs/DECISIONS.md](docs/DECISIONS.md).
+El detalle y la justificación de cada una está en [docs/DECISIONES.md](docs/DECISIONES.md).
 
-1. **Se implementó QR, no rotación.** El enunciado se contradice: la sección de arquitectura habla de "rotación de la matriz" y la de funcionalidad pide "la factorización QR". Se siguió el requisito funcional explícito y se dejó además un endpoint `/api/v1/rotate` que cubre la lectura alternativa.
+1. **QR es el flujo principal y la rotación también está completa.** El enunciado se contradice: la arquitectura habla de rotación y la funcionalidad pide QR. Ambas operaciones están disponibles en el frontend y atraviesan Go → Node para devolver estadísticas.
 2. **Householder en vez de Gram-Schmidt.** Gram-Schmidt clásico pierde ortogonalidad en `Q` con matrices mal condicionadas; Householder es incondicionalmente estable. Hay un test con una matriz de Hilbert que lo demuestra.
 3. **Tolerancia relativa por matriz para "es diagonal".** Comparar con `== 0` haría que ninguna matriz real pareciera diagonal, porque QR deja residuos de redondeo. La tolerancia se deriva de la magnitud de **cada** matriz: una global tomada de la mayor enmascararía valores significativos de las pequeñas.
 4. **Suma compensada de Neumaier.** Sumar miles de valores de magnitudes distintas pierde precisión; el algoritmo conserva el error de cada paso y lo reintegra.

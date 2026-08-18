@@ -10,7 +10,7 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       // server.ts solo abre el puerto y registra los manejadores de señales:
       // se ejercita levantando el servicio, no con pruebas unitarias.
-      exclude: ['src/server.ts'],
+      exclude: ['src/servidor.ts'],
     },
   },
 });

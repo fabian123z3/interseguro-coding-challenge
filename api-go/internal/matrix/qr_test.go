@@ -5,116 +5,116 @@ import (
 	"testing"
 )
 
-// TestQRFullProperties verifica las tres propiedades que definen la
+// TestQRPropiedadesCompletas verifica las tres propiedades que definen la
 // factorización, en lugar de comparar contra valores precalculados.
 //
 // Esto es deliberado: A = Q·R no es única (invertir el signo de una columna de
 // Q y de la fila correspondiente de R produce otra factorización igualmente
 // válida), así que fijar valores esperados ataría el test a un detalle de
 // implementación en vez de al contrato matemático.
-func TestQRFullProperties(t *testing.T) {
+func TestQRPropiedadesCompletas(t *testing.T) {
 	cases := []struct {
 		name string
-		a    Matrix
+		a    Matriz
 	}{
 		{
 			name: "cuadrada bien condicionada",
-			a:    Matrix{{12, -51, 4}, {6, 167, -68}, {-4, 24, -41}},
+			a:    Matriz{{12, -51, 4}, {6, 167, -68}, {-4, 24, -41}},
 		},
 		{
 			name: "más filas que columnas (m > n)",
-			a:    Matrix{{1, 2}, {3, 4}, {5, 6}, {7, 8}},
+			a:    Matriz{{1, 2}, {3, 4}, {5, 6}, {7, 8}},
 		},
 		{
 			name: "más columnas que filas (m < n)",
-			a:    Matrix{{1, 2, 3, 4}, {5, 6, 7, 8}},
+			a:    Matriz{{1, 2, 3, 4}, {5, 6, 7, 8}},
 		},
 		{
 			name: "vector columna",
-			a:    Matrix{{3}, {4}, {12}},
+			a:    Matriz{{3}, {4}, {12}},
 		},
 		{
 			name: "vector fila",
-			a:    Matrix{{3, 4, 12}},
+			a:    Matriz{{3, 4, 12}},
 		},
 		{
 			name: "escalar 1×1",
-			a:    Matrix{{7}},
+			a:    Matriz{{7}},
 		},
 		{
 			name: "escalar 1×1 negativo",
-			a:    Matrix{{-7}},
+			a:    Matriz{{-7}},
 		},
 		{
 			name: "identidad",
-			a:    Identity(4),
+			a:    Identidad(4),
 		},
 		{
 			// Rango 1: cada fila es múltiplo de la primera. Gram-Schmidt
 			// clásico se degrada notoriamente aquí; Householder no.
 			name: "columnas linealmente dependientes",
-			a:    Matrix{{1, 2, 3}, {2, 4, 6}, {3, 6, 9}},
+			a:    Matriz{{1, 2, 3}, {2, 4, 6}, {3, 6, 9}},
 		},
 		{
 			name: "matriz nula",
-			a:    New(3, 3),
+			a:    Nueva(3, 3),
 		},
 		{
 			// Primera columna ya alineada con e₁: ejercita la rama en que la
 			// subcolumna no requiere reflexión.
 			name: "primera columna canónica",
-			a:    Matrix{{5, 1, 2}, {0, 3, 4}, {0, 0, 6}},
+			a:    Matriz{{5, 1, 2}, {0, 3, 4}, {0, 0, 6}},
 		},
 		{
-			// Verifica el escalado de norm2: elevar 1e150 al cuadrado
+			// Verifica el escalado de norma2: elevar 1e150 al cuadrado
 			// desbordaría a +Inf sin él.
 			name: "valores muy grandes",
-			a:    Matrix{{1e150, 2e150}, {3e150, 4e150}},
+			a:    Matriz{{1e150, 2e150}, {3e150, 4e150}},
 		},
 		{
 			// El extremo opuesto: sin escalado, el cuadrado se anula por
 			// underflow y la norma daría 0.
 			name: "valores muy pequeños",
-			a:    Matrix{{1e-150, 2e-150}, {3e-150, 4e-150}},
+			a:    Matriz{{1e-150, 2e-150}, {3e-150, 4e-150}},
 		},
 		{
 			name: "valores mixtos con ceros intercalados",
-			a:    Matrix{{0, 1, 0}, {2, 0, 3}, {0, 4, 0}, {5, 0, 0}},
+			a:    Matriz{{0, 1, 0}, {2, 0, 3}, {0, 4, 0}, {5, 0, 0}},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m, n := tc.a.Rows(), tc.a.Cols()
-			d := QR(tc.a, ModeFull)
+			m, n := tc.a.Filas(), tc.a.Columnas()
+			d := QR(tc.a, ModoCompleto)
 
-			assertDimensions(t, "Q", d.Q, m, m)
-			assertDimensions(t, "R", d.R, m, n)
+			verificarDimensiones(t, "Q", d.Q, m, m)
+			verificarDimensiones(t, "R", d.R, m, n)
 
-			assertReconstructs(t, tc.a, d.Q, d.R)
-			assertOrthonormalColumns(t, d.Q)
+			verificarReconstruccion(t, tc.a, d.Q, d.R)
+			verificarColumnasOrtonormales(t, d.Q)
 
-			if !d.R.IsUpperTriangular(0) {
+			if !d.R.EsTriangularSuperior(0) {
 				t.Errorf("R no es triangular superior de forma exacta:\n%v", d.R)
 			}
-			if d.Mode != ModeFull {
-				t.Errorf("Mode = %q, se esperaba %q", d.Mode, ModeFull)
+			if d.Modo != ModoCompleto {
+				t.Errorf("Modo = %q, se esperaba %q", d.Modo, ModoCompleto)
 			}
-			if d.Residual > tolerance {
-				t.Errorf("residual = %g, supera la tolerancia %g", d.Residual, tolerance)
+			if d.Residuo > tolerancia {
+				t.Errorf("residuo = %g, supera la tolerancia %g", d.Residuo, tolerancia)
 			}
 		})
 	}
 }
 
-// TestQRDoesNotMutateInput comprueba que la matriz recibida quede intacta. El
+// TestQRNoMutaEntrada comprueba que la matriz recibida quede intacta. El
 // handler HTTP la reutiliza para calcular el residual y para la respuesta, así
 // que una mutación silenciosa corrompería ambos.
-func TestQRDoesNotMutateInput(t *testing.T) {
-	a := Matrix{{12, -51, 4}, {6, 167, -68}, {-4, 24, -41}}
-	original := a.Clone()
+func TestQRNoMutaEntrada(t *testing.T) {
+	a := Matriz{{12, -51, 4}, {6, 167, -68}, {-4, 24, -41}}
+	original := a.Clonar()
 
-	QR(a, ModeFull)
+	QR(a, ModoCompleto)
 
 	for i := range a {
 		for j := range a[i] {
@@ -125,58 +125,58 @@ func TestQRDoesNotMutateInput(t *testing.T) {
 	}
 }
 
-// TestQRReducedDimensions verifica el recorte de la variante reducida y que
+// TestQRDimensionesReducidas verifica el recorte de la variante reducida y que
 // esta siga reconstruyendo la matriz original.
-func TestQRReducedDimensions(t *testing.T) {
+func TestQRDimensionesReducidas(t *testing.T) {
 	cases := []struct {
 		name                 string
-		a                    Matrix
+		a                    Matriz
 		wantQRows, wantQCols int
 		wantRRows, wantRCols int
 	}{
 		{
 			name: "m > n recorta Q y R",
-			a:    Matrix{{1, 2}, {3, 4}, {5, 6}, {7, 8}},
+			a:    Matriz{{1, 2}, {3, 4}, {5, 6}, {7, 8}},
 			// Q pasa de 4×4 a 4×2 y R de 4×2 a 2×2.
 			wantQRows: 4, wantQCols: 2, wantRRows: 2, wantRCols: 2,
 		},
 		{
-			name: "m = n coincide con la variante completa",
-			a:    Matrix{{12, -51, 4}, {6, 167, -68}, {-4, 24, -41}},
+			name:      "m = n coincide con la variante completa",
+			a:         Matriz{{12, -51, 4}, {6, 167, -68}, {-4, 24, -41}},
 			wantQRows: 3, wantQCols: 3, wantRRows: 3, wantRCols: 3,
 		},
 		{
-			name: "m < n coincide con la variante completa",
-			a:    Matrix{{1, 2, 3, 4}, {5, 6, 7, 8}},
+			name:      "m < n coincide con la variante completa",
+			a:         Matriz{{1, 2, 3, 4}, {5, 6, 7, 8}},
 			wantQRows: 2, wantQCols: 2, wantRRows: 2, wantRCols: 4,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			d := QR(tc.a, ModeReduced)
+			d := QR(tc.a, ModoReducido)
 
-			assertDimensions(t, "Q", d.Q, tc.wantQRows, tc.wantQCols)
-			assertDimensions(t, "R", d.R, tc.wantRRows, tc.wantRCols)
+			verificarDimensiones(t, "Q", d.Q, tc.wantQRows, tc.wantQCols)
+			verificarDimensiones(t, "R", d.R, tc.wantRRows, tc.wantRCols)
 
-			assertReconstructs(t, tc.a, d.Q, d.R)
-			assertOrthonormalColumns(t, d.Q)
+			verificarReconstruccion(t, tc.a, d.Q, d.R)
+			verificarColumnasOrtonormales(t, d.Q)
 
-			if d.Mode != ModeReduced {
-				t.Errorf("Mode = %q, se esperaba %q", d.Mode, ModeReduced)
+			if d.Modo != ModoReducido {
+				t.Errorf("Modo = %q, se esperaba %q", d.Modo, ModoReducido)
 			}
 		})
 	}
 }
 
-// TestQRKnownMagnitudes contrasta contra el ejemplo canónico de la literatura.
+// TestQRMagnitudesConocidas contrasta contra el ejemplo canónico de la literatura.
 // Los signos dependen de la convención del algoritmo, así que se comparan
 // magnitudes: son invariantes entre implementaciones.
-func TestQRKnownMagnitudes(t *testing.T) {
-	a := Matrix{{12, -51, 4}, {6, 167, -68}, {-4, 24, -41}}
+func TestQRMagnitudesConocidas(t *testing.T) {
+	a := Matriz{{12, -51, 4}, {6, 167, -68}, {-4, 24, -41}}
 	want := []float64{14, 175, 35} // diagonal de R en valor absoluto
 
-	d := QR(a, ModeFull)
+	d := QR(a, ModoCompleto)
 
 	for i, w := range want {
 		if got := math.Abs(d.R[i][i]); math.Abs(got-w) > 1e-9 {
@@ -185,25 +185,25 @@ func TestQRKnownMagnitudes(t *testing.T) {
 	}
 }
 
-// TestQRIllConditioned usa una matriz de Hilbert, cuyo número de condición
+// TestQRMatrizMalCondicionada usa una matriz de Hilbert, cuyo número de condición
 // crece de forma explosiva con el tamaño. Es el escenario donde Gram-Schmidt
 // clásico pierde ortogonalidad y donde Householder debe sostenerla.
-func TestQRIllConditioned(t *testing.T) {
+func TestQRMatrizMalCondicionada(t *testing.T) {
 	const n = 8
-	hilbert := New(n, n)
+	hilbert := Nueva(n, n)
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
 			hilbert[i][j] = 1 / float64(i+j+1)
 		}
 	}
 
-	d := QR(hilbert, ModeFull)
+	d := QR(hilbert, ModoCompleto)
 
-	assertOrthonormalColumns(t, d.Q)
-	assertReconstructs(t, hilbert, d.Q, d.R)
+	verificarColumnasOrtonormales(t, d.Q)
+	verificarReconstruccion(t, hilbert, d.Q, d.R)
 }
 
-func TestNorm2(t *testing.T) {
+func TestNorma2(t *testing.T) {
 	cases := []struct {
 		name  string
 		input []float64
@@ -219,33 +219,33 @@ func TestNorm2(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := norm2(tc.input)
+			got := norma2(tc.input)
 			if tc.want == 0 {
 				if got != 0 {
-					t.Errorf("norm2 = %g, se esperaba 0", got)
+					t.Errorf("norma2 = %g, se esperaba 0", got)
 				}
 				return
 			}
 			if relErr := math.Abs(got-tc.want) / tc.want; relErr > 1e-15 {
-				t.Errorf("norm2 = %g, se esperaba %g (error relativo %g)", got, tc.want, relErr)
+				t.Errorf("norma2 = %g, se esperaba %g (error relativo %g)", got, tc.want, relErr)
 			}
 		})
 	}
 }
 
-func TestResidualOnNullMatrix(t *testing.T) {
+func TestResiduoMatrizNula(t *testing.T) {
 	// Con A nula el error relativo es 0/0; la función debe devolver 0 y no NaN.
-	a := New(2, 2)
-	d := QR(a, ModeFull)
-	if d.Residual != 0 {
-		t.Errorf("residual = %g, se esperaba 0 para la matriz nula", d.Residual)
+	a := Nueva(2, 2)
+	d := QR(a, ModoCompleto)
+	if d.Residuo != 0 {
+		t.Errorf("residuo = %g, se esperaba 0 para la matriz nula", d.Residuo)
 	}
 }
 
 // BenchmarkQR mide el caso denso más grande que admite la API por defecto.
 func BenchmarkQR(b *testing.B) {
 	const size = 128
-	a := New(size, size)
+	a := Nueva(size, size)
 	seed := uint64(42)
 	for i := 0; i < size; i++ {
 		for j := 0; j < size; j++ {
@@ -257,6 +257,6 @@ func BenchmarkQR(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		QR(a, ModeFull)
+		QR(a, ModoCompleto)
 	}
 }

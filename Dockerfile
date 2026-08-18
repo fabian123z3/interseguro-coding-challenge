@@ -53,10 +53,10 @@ COPY --from=go-builder /out/server /usr/local/bin/server
 # Frontend Web
 COPY --from=frontend-builder /src/frontend/dist /usr/share/nginx/html
 
-# Entrypoint script
-COPY entrypoint.sh /entrypoint.sh
-RUN dos2unix /entrypoint.sh && chmod +x /entrypoint.sh
+# Script de punto de entrada
+COPY punto-entrada.sh /punto-entrada.sh
+RUN dos2unix /punto-entrada.sh && chmod +x /punto-entrada.sh
 
 EXPOSE 8080 3000
 
-CMD ["/entrypoint.sh"]
+CMD ["/punto-entrada.sh"]
